@@ -1,58 +1,86 @@
-**`mlflow.autolog()`** is a powerful feature in MLflow that automatically logs parameters, metrics, models, and other relevant information during your machine learning training process. However, it's important to know what can and cannot be logged automatically.
+from sklearn.model_selection import GridSearchCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.datasets import load_breast_cancer
+import pandas as pd
+import mlflow
 
-### **Things That Can Be Logged by `mlflow.autolog`:**
+# Load the Breast Cancer dataset
+data = load_breast_cancer()
+X = pd.DataFrame(data.data, columns=data.feature_names)
+y = pd.Series(data.target, name='target')
 
-1. **Parameters:**
-   - Hyperparameters used to train the model, such as `max_depth`, `learning_rate`, `n_estimators`, etc.
+# Splitting into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-2. **Metrics:**
-   - Common evaluation metrics like accuracy, precision, recall, and loss values, depending on the model and framework being used.
+# Creating the RandomForestClassifier model
+rf = RandomForestClassifier(random_state=42)
 
-3. **Model:**
-   - The trained model itself is automatically logged.
+# Defining the parameter grid for GridSearchCV
+param_grid = {
+    'n_estimators': [10, 50, 100],
+    'max_depth': [None, 10, 20, 30]
+}
 
-4. **Artifacts:**
-   - Certain artifacts like model summary and plots (e.g., learning curves, confusion matrix) are logged if supported by the framework.
+# Applying GridSearchCV
+grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, cv=5, n_jobs=-1, verbose=2)
 
-5. **Framework-Specific Information:**
-   - Framework-specific details like early stopping criteria in gradient boosting models or deep learning models (e.g., number of epochs, optimizer configuration).
+# # Run without MLflow from here
+# grid_search.fit(X_train, y_train)
 
-6. **Environment Information:**
-   - Details about the environment such as installed libraries and versions.
+# # # Displaying the best params and best score
+# best_params = grid_search.best_params_
+# best_score = grid_search.best_score_
 
-7. **Training Data and Labels:**
-   - Information about the dataset size and sometimes feature information, but not the entire dataset itself.
+# print(best_params)
+# print(best_score)
+# # Till here
 
-8. **Automatic Model Signature:**
-   - Autologging can infer the input types (signature) of the model and save them along with the model.
 
-### **Things That Cannot Be Logged by `mlflow.autolog`:**
+mlflow.set_experiment('breast-cancer-rf-hp')
 
-1. **Custom Metrics:**
-   - Metrics not included in the default set for the specific framework (e.g., F1 score if it's not the default metric) will not be logged unless manually specified.
+with mlflow.start_run() as parent:
+    grid_search.fit(X_train, y_train)
 
-2. **Custom Artifacts:**
-   - Custom plots, charts, or files that are not part of the default model training process (e.g., a custom visualization or report).
+    # log all the child runs
+    for i in range(len(grid_search.cv_results_['params'])):
 
-3. **Preprocessed Data:**
-   - The transformed or preprocessed data used during training or testing is not logged unless you manually log it as an artifact.
+        with mlflow.start_run(nested=True) as child:
+            mlflow.log_params(grid_search.cv_results_["params"][i])
+            mlflow.log_metric("accuracy", grid_search.cv_results_["mean_test_score"][i])
 
-4. **Intermediate Model States:**
-   - Models saved at intermediate stages of training (e.g., after every epoch) are not logged unless explicitly done so.
+    # Displaying the best parameters and the best score
+    best_params = grid_search.best_params_
+    best_score = grid_search.best_score_
 
-5. **Complex Model Structures:**
-   - If you're using a non-standard or highly customized model structure, `mlflow.autolog` might miss some logging details.
+    # Log params
+    mlflow.log_params(best_params)
 
-6. **Non-standard Training Loops:**
-   - If your training loop is not compatible with the standard loops expected by MLflow (e.g., custom training loops), autologging might not capture everything correctly.
+    # Log metrics
+    mlflow.log_metric("accuracy", best_score)
 
-7. **Non-Supported Frameworks:**
-   - `mlflow.autolog` does not support all frameworks. If your model is built with a framework that MLflow doesn’t support, autologging won’t work.
+    # Log training data
+    train_df = X_train.copy()
+    train_df['target'] = y_train
 
-8. **Custom Hyperparameter Tuning:**
-   - Hyperparameters or configurations that are outside the scope of the framework’s autologging capabilities (e.g., specific settings in a custom grid search).
+    train_df = mlflow.data.from_pandas(train_df)
+    mlflow.log_input(train_df, "training")
 
-### Summary:
+    # Log test data
+    test_df = X_test.copy()
+    test_df['target'] = y_test
 
-- **Use Cases:** `mlflow.autolog` is great for quick and convenient logging, especially for standard workflows in supported frameworks.
-- **Limitations:** Custom elements, complex structures, and unsupported frameworks require manual logging to capture all relevant details.
+    test_df = mlflow.data.from_pandas(test_df)
+    mlflow.log_input(test_df, "testing")
+
+    # Log source code
+    mlflow.log_artifact(__file__)
+
+    # Log the best model
+    mlflow.sklearn.log_model(sk_model=grid_search.best_estimator_, name="random_forest", skops_trusted_types=["sklearn.tree._tree.Tree"])
+
+    # Set tags
+    mlflow.set_tag("author", "Vikash Das")
+
+    print(best_params)
+    print(best_score)
